@@ -12,6 +12,7 @@ public class EntityFitnessScoreEvent {
     public int score;
     public int life;
     public EntityFitnessRule fitnessRule;
+    public float multiplier = 1;
 
 
     public EntityFitnessScoreEvent(CCWorldEvent event, int _score, EntityFitnessRule _fitnessRule) {
@@ -22,7 +23,14 @@ public class EntityFitnessScoreEvent {
             throw new ChaosNetException("Missing `fitnessRule`");
         }
     }
+    public float getAdjustedScore(){
+        return Math.round(score * multiplier);
+    }
     public String toString(){
-        return worldEvent.toString() + " - " + score;
+        String _multiplier = ((Float)multiplier).toString();
+        if(_multiplier.length() > 3){
+            _multiplier = _multiplier.substring(0, 3);
+        }
+        return worldEvent.toString() + " = " + getAdjustedScore() + "(" + score + "*" + _multiplier + ")";
     }
 }

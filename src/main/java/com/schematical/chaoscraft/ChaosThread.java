@@ -1,8 +1,13 @@
 package com.schematical.chaoscraft;
 
+import com.google.common.primitives.Bytes;
 import com.schematical.chaoscraft.entities.EntityOrganism;
 import com.schematical.chaosnet.model.*;
+import io.netty.buffer.ByteBuf;
+import net.minecraftforge.fml.common.network.ByteBufUtils;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -75,11 +80,20 @@ public class ChaosThread implements Runnable {
 
             int statusCode = exception.sdkHttpMetadata().httpStatusCode();
             switch(statusCode){
+                case(400):
+                    ChaosCraft.orgsToReport.clear();
+                    ChaosCraft.repair();
+                    break;
                 case(401):
                     ChaosCraft.auth();
                 break;
+                case(409):
+                    //ChaosCraft.auth();
+                    break;
             }
-            ChaosCraft.chat("ChaosThread `/next` Error: " + exception.sdkHttpMetadata().responseContent().toString()+ " - statusCode: " + statusCode);
+            ByteBuffer byteBuffer = exception.sdkHttpMetadata().responseContent();
+            String message = StandardCharsets.UTF_8.decode(byteBuffer).toString();//new String(byteBuffer.as().array(), StandardCharsets.UTF_8 );
+            ChaosCraft.chat("ChaosThread `/next` Error: " + message + " - statusCode: " + statusCode);
             ChaosCraft.thread = null;
 
         }catch(Exception exception){

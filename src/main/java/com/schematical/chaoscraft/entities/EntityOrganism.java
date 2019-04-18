@@ -5,7 +5,6 @@ package com.schematical.chaoscraft.entities;
  */
 
 
-import com.google.common.collect.Lists;
 import com.mojang.authlib.GameProfile;
 import com.schematical.chaoscraft.ChaosCraft;
 import com.schematical.chaoscraft.ai.CCObservableAttributeManager;
@@ -25,24 +24,16 @@ import com.schematical.chaosnet.model.NNetRaw;
 import com.schematical.chaosnet.model.Organism;
 import it.unimi.dsi.fastutil.ints.IntList;
 import net.minecraft.block.Block;
-import net.minecraft.block.BlockAir;
 import net.minecraft.block.material.Material;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.model.ModelPlayer;
-import net.minecraft.client.renderer.entity.RenderLiving;
-import net.minecraft.client.renderer.entity.RenderManager;
-import net.minecraft.client.renderer.entity.layers.LayerHeldItem;
 import net.minecraft.client.util.RecipeItemHelper;
 import net.minecraft.enchantment.EnchantmentHelper;
 import net.minecraft.entity.*;
-import net.minecraft.entity.ai.EntityAISwimming;
 import net.minecraft.entity.ai.attributes.IAttributeInstance;
 import net.minecraft.entity.item.EntityItem;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
-import net.minecraft.init.Blocks;
-import net.minecraft.init.Items;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemBlock;
 import net.minecraft.item.ItemStack;
@@ -51,11 +42,9 @@ import net.minecraft.item.crafting.Ingredient;
 import net.minecraft.item.crafting.ShapedRecipes;
 import net.minecraft.item.crafting.ShapelessRecipes;
 import net.minecraft.util.*;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.RayTraceResult;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.math.*;
 import net.minecraft.world.World;
+import net.minecraftforge.common.ForgeChunkManager;
 import net.minecraftforge.fml.relauncher.Side;
 import net.minecraftforge.fml.relauncher.SideOnly;
 import net.minecraftforge.items.ItemStackHandler;
@@ -73,14 +62,14 @@ public class EntityOrganism extends EntityLiving {
     public EntityFitnessManager entityFitnessManager;
     protected Organism organism;
     protected NeuralNet nNet;
-    protected float digSpeed = 1;
+
     protected ItemStackHandler itemHandler = new ItemStackHandler();
     protected BlockPos lastMinePos = BlockPos.ORIGIN.down();
     int rightClickDelay = 0;
 
     protected int miningTicks = 0;
     protected int selectedItemIndex = 0;
-    protected float maxLifeSeconds = 30;
+    protected float maxLifeSeconds = 10;
     protected int ticksSinceObservationHack = 0;
 
     public boolean hasAttemptedReport = false;
@@ -98,6 +87,11 @@ public class EntityOrganism extends EntityLiving {
     public HashMap<String, BiologyBase> inputs = new HashMap<String, BiologyBase>();
     public List<OrgEvent> events = new ArrayList<OrgEvent>();
     public EntityPlayerMP observingPlayer;
+    public Vec3d spawnPos;
+    private boolean hasTraveled = false;
+    public int ticksWithouUpdate = 0;
+
+    public ForgeChunkManager.Ticket chunkTicket;
 
     public EntityOrganism(World worldIn) {
         this(worldIn, "EntityOrganism");
@@ -108,8 +102,12 @@ public class EntityOrganism extends EntityLiving {
 
         this.tasks.taskEntries.clear();
 
+        if(!world.isRemote) {
+            chunkTicket = ForgeChunkManager.requestTicket(ChaosCraft.INSTANCE, world, ForgeChunkManager.Type.ENTITY);
+            chunkTicket.bindEntity(this);
+        }
 
-        this.tasks.addTask(1, new EntityAISwimming(this));
+        //this.tasks.addTask(1, new EntityAISwimming(this));
 
         this.entityFitnessManager = new EntityFitnessManager(this);
 
@@ -122,6 +120,7 @@ public class EntityOrganism extends EntityLiving {
 
         ItemStack stack2 = new ItemStack(Blocks.PLANKS, 3);
         this.itemHandler.setStackInSlot(1, stack2);*/
+        this.enablePersistence();
      }
      public String getCCNamespace(){
         if(this.organism == null){
@@ -211,27 +210,56 @@ public class EntityOrganism extends EntityLiving {
         return super.attackEntityFrom(source, amount);
     }
 
-
     @Override
     public void onUpdate(){
 
+        if(this.firstUpdate) {
+            if(!this.world.isRemote) {
+                ForgeChunkManager.forceChunk(chunkTicket, new ChunkPos(this.getPosition()));
+            }
+        }
+
+        if(this.isDead || this.dead) {
+            if(chunkTicket!=null) {
+                ForgeChunkManager.releaseTicket(chunkTicket);
+                chunkTicket = null;
+            }
+        }
+        ticksWithouUpdate = 0;
+
         if(getDebug()){
-            int i = 0;
+
         }
 
         if(!world.isRemote){
+
             //Tick neural net
             if(
                 this.nNet != null &&
                 this.nNet.ready
             ) {
+                if(!this.hasTraveled) {
+                    if (this.spawnPos != null) {
+                        if (this.spawnPos.distanceTo(this.getPositionVector()) > 5) {
+                            CCWorldEvent worldEvent = new CCWorldEvent(CCWorldEvent.Type.HAS_TRAVELED);
+                            entityFitnessManager.test(worldEvent);
+                        }
+                    } else {
+                        this.spawnPos = this.getPositionVector();
+                    }
+                }
+
                 List<OutputNeuron> outputs = this.nNet.evaluate();
                 Iterator<OutputNeuron> iterator = outputs.iterator();
                 JSONObject jsonObject = null;
                 JSONArray outputValues = null;
                 if(observingPlayer != null) {
-                    jsonObject = new JSONObject();
-                    outputValues = new JSONArray();
+                    if(observingPlayer.getSpectatingEntity().equals(this)) {
+                        jsonObject = new JSONObject();
+                        outputValues = new JSONArray();
+                    }else{
+                        observingPlayer = null;
+                    }
                 }
                 while (iterator.hasNext()) {
 
@@ -280,29 +308,40 @@ public class EntityOrganism extends EntityLiving {
                 this.setRotation(this.rotationYaw, this.rotationPitch);
                 this.observationHack();
                 Iterator<OrgEvent> eventIterator = events.iterator();
+
                 while(eventIterator.hasNext()){
                     OrgEvent event = eventIterator.next();
                     int eventTTL = event.tick();
                     if(eventTTL <= 0){
                         eventIterator.remove();
                     }
+                    //Check to see if there is a reward prediction
                 }
             }
 
         }
         super.onUpdate();
         if(!world.isRemote) {
-            if (
-                //this.organism == null ||
-                getAgeSeconds() > maxLifeSeconds ||
-                this.spawnHash != ChaosCraft.spawnHash
-            ) {
-                this.dropInventory();
-                //ChaosCraft.logger.info("Killing: " + this.getName() + " - AGE: " + age + " - maxLifeSeconds: " + maxLifeSeconds + " - Score: " + this.entityFitnessManager.totalScore());
-                this.setDead();
-                return;
-            }
 
+            checkStatus();
+        }
+    }
+    public boolean checkStatus(){
+        if (
+            //this.organism == null ||
+                getAgeSeconds() > maxLifeSeconds ||
+                        this.spawnHash != ChaosCraft.spawnHash
+                ) {
+            //this.dropInventory();
+            this.setDead();
+            return true;
+        }
+        return false;
+    }
+    public void manualUpdateCheck(){
+        ticksWithouUpdate += 1;
+        if(ticksWithouUpdate > 5){
+            checkStatus();
         }
     }
 
@@ -449,7 +488,7 @@ public class EntityOrganism extends EntityLiving {
         }
 
         ItemStack outputStack = recipe.getRecipeOutput().copy();
-        ChaosCraft.logger.info(this.getCCNamespace() + " - Crafted: " + outputStack.getDisplayName());
+        //ChaosCraft.logger.info(this.getCCNamespace() + " - Crafted: " + outputStack.getDisplayName());
         if(emptySlot != -1) {
             itemHandler.insertItem(emptySlot, outputStack, false);
             observableAttributeManager.ObserveCraftableRecipes(this);
@@ -469,7 +508,8 @@ public class EntityOrganism extends EntityLiving {
         super.onDeath(cause);
         if (!this.world.isRemote)
         {
-
+            ForgeChunkManager.releaseTicket(chunkTicket);
+            chunkTicket = null;
             dropInventory();
             if (world.getMinecraftServer() != null) {
                 world.getMinecraftServer().getPlayerList().sendMessage(cause.getDeathMessage(this));
@@ -543,7 +583,7 @@ public class EntityOrganism extends EntityLiving {
             return null;
         }
         Vec3d itemVec3d = null;
-        ChaosCraft.logger.info(this.getCCNamespace() + " - Tossing: " + itemStack.getItem().getRegistryName());
+        //ChaosCraft.logger.info(this.getCCNamespace() + " - Tossing: " + itemStack.getItem().getRegistryName());
 
 
 
@@ -675,10 +715,9 @@ public class EntityOrganism extends EntityLiving {
         boolean harvest = state.getBlock().canHarvestBlock(world, pos, this.getPlayerWrapper());
 
         ItemStack stack = getHeldItemMainhand();
-        String tool = state.getBlock().getHarvestTool(state);
+        //String tool = state.getBlock().getHarvestTool(state);
 
 
-        //ChaosCraft.logger.info(this.getName() + " Mining: " + state.getBlock().getLocalizedName() + " Tool:" + tool + " Held Stack: " + stack.getDisplayName() + "  Hardness: " + hardness + " - " + miningTicks + " - " + harvest + " => " + (hardness * miningTicks > 1.0f));
         //Check if block has been broken
         if (state.getPlayerRelativeBlockHardness(this.getPlayerWrapper(), world, pos) * miningTicks > 1.0f) {
             //Broken
@@ -696,14 +735,15 @@ public class EntityOrganism extends EntityLiving {
             } else {
                 harvest = false;
             }
+            ChaosCraft.logger.info(this.getName() + " Mining: " + state.getBlock().getRegistryName().toString() +  " Held Stack: " + stack.getItem().getRegistryName().toString() + "  Harvest: "  + harvest);
 
             if (harvest) {
                 state.getBlock().harvestBlock(world, this.getPlayerWrapper(), pos, state, world.getTileEntity(pos), stack);
-
+                CCWorldEvent worldEvent = new CCWorldEvent(CCWorldEvent.Type.BLOCK_MINED);
+                worldEvent.block = state.getBlock();
+                entityFitnessManager.test(worldEvent);
             }
-            CCWorldEvent worldEvent = new CCWorldEvent(CCWorldEvent.Type.BLOCK_MINED);
-            worldEvent.block = state.getBlock();
-            entityFitnessManager.test(worldEvent);
+
         }
     }
 
@@ -715,7 +755,7 @@ public class EntityOrganism extends EntityLiving {
 
     private void pickupItem(EntityItem item) {
         if (item.cannotPickup()) return;
-        ChaosCraft.logger.info(this.getCCNamespace() + " - Picked up: " + item.getItem().getItem().getRegistryName());
+        //ChaosCraft.logger.info(this.getCCNamespace() + " - Picked up: " + item.getItem().getItem().getRegistryName());
         ItemStack stack = item.getItem();
 
         Item worldEventItem = stack.getItem();
@@ -756,8 +796,8 @@ public class EntityOrganism extends EntityLiving {
             switch (result.typeOfHit) {
                 case BLOCK:
                     BlockPos blockpos = result.getBlockPos();
-
-                    if (this.world.getBlockState(blockpos).getMaterial() != Material.AIR) {
+                    IBlockState state = this.world.getBlockState(blockpos);
+                    if (state.getMaterial() != Material.AIR) {
 
                         EnumActionResult enumactionresult = rightClickBlock(blockpos, result.sideHit, result.hitVec, hand);
 
@@ -765,6 +805,9 @@ public class EntityOrganism extends EntityLiving {
                         if (enumactionresult == EnumActionResult.SUCCESS) {
                             this.swingArm(hand);
 
+                            CCWorldEvent worldEvent = new CCWorldEvent(CCWorldEvent.Type.BLOCK_PLACED);
+                            worldEvent.block = state.getBlock();
+                            entityFitnessManager.test(worldEvent);
                             return;
                         }
                     }
@@ -942,6 +985,23 @@ public class EntityOrganism extends EntityLiving {
         return flag;
     }
 
+    @Override
+    public void setDead() {
+        super.setDead();
 
+        if(!world.isRemote) {
+            ForgeChunkManager.releaseTicket(chunkTicket);
+            chunkTicket = null;
+        }
+    }
 
+    @Override
+    public void onRemovedFromWorld() {
+        super.onRemovedFromWorld();
+
+        if(!world.isRemote&&chunkTicket!=null) {
+            ForgeChunkManager.releaseTicket(chunkTicket);
+            chunkTicket = null;
+        }
+    }
 }

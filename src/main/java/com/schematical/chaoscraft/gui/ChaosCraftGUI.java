@@ -16,6 +16,7 @@ import net.minecraftforge.fml.relauncher.SideOnly;
 
 import java.awt.*;
 import java.util.ArrayList;
+import java.util.Iterator;
 
 
 /**
@@ -29,17 +30,20 @@ public class ChaosCraftGUI {
 
     public static void render(RenderWorldLastEvent event){
         EntityPlayer player = Minecraft.getMinecraft().player;
+
         double partialTicks = (double) event.getPartialTicks();
-        double xo = player.lastTickPosX + ((player.posX - player.lastTickPosX) * partialTicks);
-        double yo = player.lastTickPosY + ((player.posY - player.lastTickPosY) * partialTicks);
-        double zo = player.lastTickPosZ + ((player.posZ - player.lastTickPosZ) * partialTicks);
+        double xo = Minecraft.getMinecraft().getRenderManager().viewerPosX;///*player.lastTickPosX*/ + ((player.posX - player.lastTickPosX) * partialTicks);
+        double yo = Minecraft.getMinecraft().getRenderManager().viewerPosY;///*player.lastTickPosY*/ + ((player.posY - player.lastTickPosY) * partialTicks);
+        double zo = Minecraft.getMinecraft().getRenderManager().viewerPosZ;///*player.lastTickPosZ*/ + ((player.posZ - player.lastTickPosZ) * partialTicks);
 
         GlStateManager.pushMatrix();
 
         GlStateManager.translate(-xo, -yo, -zo);
 
         isRendering = true;
-        for(CCBox toRenderBox : toRenderBoxs){
+        Iterator<CCBox> iterator = toRenderBoxs.iterator();
+        while (iterator.hasNext()){
+            CCBox toRenderBox  = iterator.next();
             drawBoundingBox(toRenderBox.start, toRenderBox.end, toRenderBox.color);
         }
         toRenderBoxs.clear();
@@ -51,6 +55,7 @@ public class ChaosCraftGUI {
         isRendering = false;
 
         GlStateManager.popMatrix();
+        GlStateManager.translate(0, 0, 0);
     }
 
     public static void drawBoundingBox(Vec3d posA, Vec3d posB, Color c) {
@@ -78,7 +83,7 @@ public class ChaosCraftGUI {
         bufferBuilder.pos(posA.x+dx, posA.y, posA.z).color(c.getRed(), c.getGreen(), c.getBlue(), c.getAlpha()).endVertex();       //D
         bufferBuilder.pos(posA.x, posA.y, posA.z).color(c.getRed(), c.getGreen(), c.getBlue(), c.getAlpha()).endVertex();          //A
 
-        //TOP --> E to F to G to H and bac kto E
+        //TOP --> E to F to G to H and back to E
         bufferBuilder.pos(posA.x, posA.y+dy, posA.z).color(c.getRed(), c.getGreen(), c.getBlue(), 0).endVertex();       //E
         bufferBuilder.pos(posA.x, posA.y+dy, posA.z+dz).color(c.getRed(), c.getGreen(), c.getBlue(), c.getAlpha()).endVertex();    //F
         bufferBuilder.pos(posA.x+dx, posA.y+dy, posA.z+dz).color(c.getRed(), c.getGreen(), c.getBlue(), c.getAlpha()).endVertex(); //G

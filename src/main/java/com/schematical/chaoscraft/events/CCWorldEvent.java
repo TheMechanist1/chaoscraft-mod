@@ -16,7 +16,8 @@ public class CCWorldEvent {
         HEALTH_CHANGE,
         ITEM_COLLECTED,
         ENTITY_ATTACKED,
-        TOSSED_EQUIPPED_STACK
+        TOSSED_EQUIPPED_STACK,
+        HAS_TRAVELED
     }
     public Type eventType;
     public Block block;
@@ -37,7 +38,7 @@ public class CCWorldEvent {
             response += " " + item.getRegistryName();
         }
         if(entity != null){
-            response += " " + entity.getDisplayName();
+            response += " " + entity.getName();
         }
         return response;
     }
